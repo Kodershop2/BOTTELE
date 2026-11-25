@@ -1,5 +1,5 @@
 /**
- * Shop Telegram Bot - Có đầy đủ dấu tiếng Việt
+ * Shop Telegram Bot
  */
 const TelegramBot = require('node-telegram-bot-api');
 const fetch = require('node-fetch');
@@ -15,16 +15,24 @@ const API = 'https://api.jsonbin.io/v3/b/' + BIN_ID;
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 console.log('Bot started');
 
+// Nút Mua hàng luôn hiện
+const mainKeyboard = {
+  keyboard: [[{ text: '🛒 Mua hàng' }]],
+  resize_keyboard: true,
+  persistent: true
+};
+
 async function getData() {
   const res = await fetch(API + '/latest', {
     headers: { 'X-Master-Key': MASTER_KEY }
   });
   if (!res.ok) throw new Error('JSONBin lỗi ' + res.status);
   const json = await res.json();
-  const data = json.record || { products: [], orders: [], config: {} };
+  const data = json.record || { products: [], orders: [], config: {}, users: [] };
   if (!data.products) data.products = [];
   if (!data.orders) data.orders = [];
   if (!data.config) data.config = {};
+  if (!data.users) data.users = [];
   if (!data.config.bank) {
     data.config.bank = {
       bin: '970454',
@@ -48,6 +56,25 @@ async function saveData(data) {
   if (!res.ok) throw new Error('Lưu JSONBin lỗi ' + res.status);
 }
 
+// Lưu user đã tương tác
+async function trackUser(from) {
+  try {
+    const data = await getData();
+    const exists = data.users.find(u => u.id === from.id);
+    if (!exists) {
+      data.users.push({
+        id: from.id,
+        username: from.username || '',
+        name: [from.first_name, from.last_name].filter(Boolean).join(' '),
+        joinedAt: new Date().toISOString()
+      });
+      await saveData(data);
+    }
+  } catch (e) {
+    console.error('trackUser:', e.message);
+  }
+}
+
 function formatMoney(n) {
   return new Intl.NumberFormat('vi-VN').format(n) + 'đ';
 }
@@ -59,61 +86,75 @@ function makeOrderId() {
 function vietQRUrl(bank, amount, addInfo) {
   const accName = encodeURIComponent(bank.name || '');
   const info = encodeURIComponent(addInfo || '');
-  // template compact2 + qr_only để tăng khả năng Telegram tải được
   return 'https://img.vietqr.io/image/' + bank.bin + '-' + bank.account + '-compact2.png?amount=' + amount + '&addInfo=' + info + '&accountName=' + accName;
 }
 
-async function downloadQR(url) {
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Accept': 'image/png,image/*'
-    },
-    redirect: 'follow',
-    timeout: 15000
+async function showShop(chatId) {
+  const data = await getData();
+  const products = data.products.filter(p => p.types && p.types.some(t => t.stock > 0));
+  if (!products.length) {
+    return bot.sendMessage(chatId, 'Hiện chưa có sản phẩm nào.', { reply_markup: mainKeyboard });
+  }
+  const keyboard = products.map(p => [{ text: '🛒 ' + p.name, callback_data: 'p|' + p.id }]);
+  await bot.sendMessage(chatId, '📦 Chọn sản phẩm bạn muốn mua:', {
+    reply_markup: { inline_keyboard: keyboard }
   });
-  if (!res.ok) throw new Error('Tai QR fail ' + res.status);
-  return await res.buffer();
 }
 
-bot.onText(/\/start/, (msg) => {
-  bot.sendMessage(msg.chat.id, 'Chào bạn! Gửi /shop để xem sản phẩm.');
+// /start
+bot.onText(/\/start/, async (msg) => {
+  await trackUser(msg.from);
+  await bot.sendMessage(msg.chat.id,
+    'Chào bạn! 👋\n\nBấm nút **Mua hàng** bên dưới hoặc gửi /shop để xem sản phẩm.',
+    { parse_mode: 'Markdown', reply_markup: mainKeyboard }
+  );
 });
 
+// /shop
+bot.onText(/\/shop/, async (msg) => {
+  await trackUser(msg.from);
+  try {
+    await showShop(msg.chat.id);
+  } catch (e) {
+    bot.sendMessage(msg.chat.id, 'Lỗi: ' + e.message, { reply_markup: mainKeyboard });
+  }
+});
+
+// Nút "Mua hàng"
+bot.on('message', async (msg) => {
+  if (!msg.text) return;
+  if (msg.text === '🛒 Mua hàng' || msg.text === 'Mua hàng') {
+    await trackUser(msg.from);
+    try {
+      await showShop(msg.chat.id);
+    } catch (e) {
+      bot.sendMessage(msg.chat.id, 'Lỗi: ' + e.message, { reply_markup: mainKeyboard });
+    }
+  }
+});
+
+// /setadmin
 bot.onText(/\/setadmin/, async (msg) => {
   try {
     const data = await getData();
     data.config = data.config || {};
     data.config.adminChatId = msg.chat.id;
     await saveData(data);
-    bot.sendMessage(msg.chat.id, '✅ Đã set admin: ' + msg.chat.id);
+    bot.sendMessage(msg.chat.id, '✅ Đã set admin: ' + msg.chat.id, { reply_markup: mainKeyboard });
   } catch (e) {
     bot.sendMessage(msg.chat.id, 'Lỗi: ' + e.message);
   }
 });
 
-bot.onText(/\/shop/, async (msg) => {
-  try {
-    const data = await getData();
-    const products = data.products.filter(p => p.types && p.types.some(t => t.stock > 0));
-    if (!products.length) return bot.sendMessage(msg.chat.id, 'Chưa có sản phẩm nào.');
-
-    const keyboard = products.map(p => [{ text: '🛒 ' + p.name, callback_data: 'p|' + p.id }]);
-    await bot.sendMessage(msg.chat.id, '📦 Chọn sản phẩm bạn muốn mua:', {
-      reply_markup: { inline_keyboard: keyboard }
-    });
-  } catch (e) {
-    bot.sendMessage(msg.chat.id, 'Lỗi shop: ' + e.message);
-  }
-});
-
+// Callback
 bot.on('callback_query', async (query) => {
   const chatId = query.message.chat.id;
   const dataCb = query.data || '';
   const from = query.from;
 
   try {
-    // Chọn sản phẩm
+    await trackUser(from);
+
     if (dataCb.startsWith('p|')) {
       const productId = dataCb.slice(2);
       const data = await getData();
@@ -137,7 +178,6 @@ bot.on('callback_query', async (query) => {
       return bot.answerCallbackQuery(query.id);
     }
 
-    // Quay lại
     if (dataCb === 'back') {
       const data = await getData();
       const products = data.products.filter(p => p.types && p.types.some(t => t.stock > 0));
@@ -150,7 +190,6 @@ bot.on('callback_query', async (query) => {
       return bot.answerCallbackQuery(query.id);
     }
 
-    // Chọn loại → tạo đơn + gửi QR
     if (dataCb.startsWith('t|')) {
       const parts = dataCb.split('|');
       const productId = parts[1];
@@ -176,13 +215,13 @@ bot.on('callback_query', async (query) => {
         userId: from.id,
         username: from.username || '',
         fullName: [from.first_name, from.last_name].filter(Boolean).join(' '),
-        productId: productId,
+        productId,
         productName: product.name,
-        typeId: typeId,
+        typeId,
         typeName: type.name,
         price: type.price,
         status: 'pending',
-        paymentNote: paymentNote,
+        paymentNote,
         createdAt: new Date().toISOString()
       });
       await saveData(data);
@@ -194,53 +233,20 @@ bot.on('callback_query', async (query) => {
         'Loại: ' + type.name + '\n' +
         'Số tiền: ' + formatMoney(type.price) + '\n\n' +
         'Nội dung CK: ' + paymentNote + '\n\n' +
-        '📲 Quét mã QR bên dưới để thanh toán.\n' +
-        'Sau khi chuyển xong bấm nút Đã thanh toán.';
+        '📲 Bấm vào link bên dưới để xem mã QR thanh toán:\n' +
+        qrUrl + '\n\n' +
+        'Sau khi chuyển khoản xong, bấm nút ✅ Đã thanh toán.';
 
-      const replyMarkup = {
-        inline_keyboard: [[{ text: '✅ Đã thanh toán', callback_data: 'paid|' + orderId }]]
-      };
-
-      let sentPhoto = false;
-      const tmpFile = path.join('/tmp', 'qr_' + orderId + '.png');
-
-      try {
-        const buffer = await downloadQR(qrUrl);
-        fs.writeFileSync(tmpFile, buffer);
-        await bot.sendPhoto(chatId, tmpFile, {
-          caption: text,
-          reply_markup: replyMarkup
-        });
-        sentPhoto = true;
-      } catch (e1) {
-        console.error('File photo fail:', e1.message);
-      } finally {
-        try { fs.unlinkSync(tmpFile); } catch (e) {}
-      }
-
-      if (!sentPhoto) {
-        try {
-          await bot.sendPhoto(chatId, qrUrl, {
-            caption: text,
-            reply_markup: replyMarkup
-          });
-          sentPhoto = true;
-        } catch (e2) {
-          console.error('URL photo fail:', e2.message);
+      await bot.sendMessage(chatId, text, {
+        reply_markup: {
+          inline_keyboard: [[{ text: '✅ Đã thanh toán', callback_data: 'paid|' + orderId }]]
         }
-      }
-
-      if (!sentPhoto) {
-        await bot.sendMessage(chatId, text + '\n\n⚠️ Không gửi được ảnh QR, bấm link:\n' + qrUrl, {
-          reply_markup: replyMarkup
-        });
-      }
+      });
 
       try { await bot.deleteMessage(chatId, query.message.message_id); } catch (e) {}
       return;
     }
 
-    // Bấm Đã thanh toán
     if (dataCb.startsWith('paid|')) {
       const orderId = dataCb.slice(5);
       const data = await getData();
