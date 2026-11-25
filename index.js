@@ -55,10 +55,23 @@ function makeOrderId() {
 }
 
 function vietQRUrl(bank, amount, addInfo) {
-  // Dùng template URL chuẩn của VietQR, encode thủ công
   const accName = encodeURIComponent(bank.name || '');
   const info = encodeURIComponent(addInfo || '');
+  // template compact2 + qr_only để tăng khả năng Telegram tải được
   return 'https://img.vietqr.io/image/' + bank.bin + '-' + bank.account + '-compact2.png?amount=' + amount + '&addInfo=' + info + '&accountName=' + accName;
+}
+
+async function downloadQR(url) {
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'Accept': 'image/png,image/*'
+    },
+    redirect: 'follow',
+    timeout: 15000
+  });
+  if (!res.ok) throw new Error('Tai QR fail ' + res.status);
+  return await res.buffer();
 }
 
 bot.onText(/\/start/, (msg) => {
@@ -188,41 +201,36 @@ bot.on('callback_query', async (query) => {
 
       let sentPhoto = false;
 
-      // Cách 1: Gửi bằng URL trực tiếp (Telegram tự tải)
+      // Gửi ảnh bằng buffer đúng cách (source + filename)
       try {
-        await bot.sendPhoto(chatId, qrUrl, {
+        const buffer = await downloadQR(qrUrl);
+        await bot.sendPhoto(chatId, {
+          source: buffer,
+          filename: 'vietqr.png'
+        }, {
           caption: text,
           reply_markup: replyMarkup
         });
         sentPhoto = true;
       } catch (e1) {
-        console.error('sendPhoto URL fail:', e1.message);
+        console.error('Buffer photo fail:', e1.message);
       }
 
-      // Cách 2: Tải buffer rồi gửi
+      // Thử URL nếu buffer fail
       if (!sentPhoto) {
         try {
-          const imgRes = await fetch(qrUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0' },
-            redirect: 'follow'
+          await bot.sendPhoto(chatId, qrUrl, {
+            caption: text,
+            reply_markup: replyMarkup
           });
-          if (imgRes.ok) {
-            const buffer = await imgRes.buffer();
-            await bot.sendPhoto(chatId, buffer, {
-              caption: text,
-              reply_markup: replyMarkup,
-              filename: 'qr.png'
-            });
-            sentPhoto = true;
-          }
+          sentPhoto = true;
         } catch (e2) {
-          console.error('sendPhoto buffer fail:', e2.message);
+          console.error('URL photo fail:', e2.message);
         }
       }
 
-      // Cách 3: Gửi link
       if (!sentPhoto) {
-        await bot.sendMessage(chatId, text + '\n\n🔗 Bấm link để xem mã QR:\n' + qrUrl, {
+        await bot.sendMessage(chatId, text + '\n\n⚠️ Không gửi được ảnh QR, bấm link:\n' + qrUrl, {
           reply_markup: replyMarkup
         });
       }
