@@ -1,5 +1,5 @@
 /**
- * Shop Telegram Bot - Doc bank info tu JSONBin
+ * Shop Telegram Bot - Có đầy đủ dấu tiếng Việt
  */
 const TelegramBot = require('node-telegram-bot-api');
 const fetch = require('node-fetch');
@@ -17,7 +17,7 @@ async function getData() {
   const res = await fetch(API + '/latest', {
     headers: { 'X-Master-Key': MASTER_KEY }
   });
-  if (!res.ok) throw new Error('JSONBin loi ' + res.status);
+  if (!res.ok) throw new Error('JSONBin lỗi ' + res.status);
   const json = await res.json();
   const data = json.record || { products: [], orders: [], config: {} };
   if (!data.products) data.products = [];
@@ -43,11 +43,11 @@ async function saveData(data) {
     },
     body: JSON.stringify(data)
   });
-  if (!res.ok) throw new Error('Luu JSONBin loi ' + res.status);
+  if (!res.ok) throw new Error('Lưu JSONBin lỗi ' + res.status);
 }
 
 function formatMoney(n) {
-  return new Intl.NumberFormat('vi-VN').format(n) + 'd';
+  return new Intl.NumberFormat('vi-VN').format(n) + 'đ';
 }
 
 function makeOrderId() {
@@ -64,7 +64,7 @@ function vietQRUrl(bank, amount, addInfo) {
 }
 
 bot.onText(/\/start/, (msg) => {
-  bot.sendMessage(msg.chat.id, 'Chao ban! Gui /shop de xem san pham.');
+  bot.sendMessage(msg.chat.id, 'Chào bạn! Gửi /shop để xem sản phẩm.');
 });
 
 bot.onText(/\/setadmin/, async (msg) => {
@@ -73,9 +73,9 @@ bot.onText(/\/setadmin/, async (msg) => {
     data.config = data.config || {};
     data.config.adminChatId = msg.chat.id;
     await saveData(data);
-    bot.sendMessage(msg.chat.id, 'Da set admin: ' + msg.chat.id);
+    bot.sendMessage(msg.chat.id, '✅ Đã set admin: ' + msg.chat.id);
   } catch (e) {
-    bot.sendMessage(msg.chat.id, 'Loi: ' + e.message);
+    bot.sendMessage(msg.chat.id, 'Lỗi: ' + e.message);
   }
 });
 
@@ -83,14 +83,14 @@ bot.onText(/\/shop/, async (msg) => {
   try {
     const data = await getData();
     const products = data.products.filter(p => p.types && p.types.some(t => t.stock > 0));
-    if (!products.length) return bot.sendMessage(msg.chat.id, 'Chua co san pham.');
+    if (!products.length) return bot.sendMessage(msg.chat.id, 'Chưa có sản phẩm nào.');
 
-    const keyboard = products.map(p => [{ text: p.name, callback_data: 'p|' + p.id }]);
-    await bot.sendMessage(msg.chat.id, 'Chon san pham:', {
+    const keyboard = products.map(p => [{ text: '🛒 ' + p.name, callback_data: 'p|' + p.id }]);
+    await bot.sendMessage(msg.chat.id, '📦 Chọn sản phẩm bạn muốn mua:', {
       reply_markup: { inline_keyboard: keyboard }
     });
   } catch (e) {
-    bot.sendMessage(msg.chat.id, 'Loi shop: ' + e.message);
+    bot.sendMessage(msg.chat.id, 'Lỗi shop: ' + e.message);
   }
 });
 
@@ -100,22 +100,23 @@ bot.on('callback_query', async (query) => {
   const from = query.from;
 
   try {
+    // Chọn sản phẩm
     if (dataCb.startsWith('p|')) {
       const productId = dataCb.slice(2);
       const data = await getData();
       const product = data.products.find(p => p.id === productId);
-      if (!product) return bot.answerCallbackQuery(query.id, { text: 'Khong tim thay SP' });
+      if (!product) return bot.answerCallbackQuery(query.id, { text: 'Không tìm thấy sản phẩm' });
 
       const types = (product.types || []).filter(t => t.stock > 0);
-      if (!types.length) return bot.answerCallbackQuery(query.id, { text: 'Het hang' });
+      if (!types.length) return bot.answerCallbackQuery(query.id, { text: 'Hết hàng' });
 
       const keyboard = types.map(t => [{
-        text: t.name + ' - ' + formatMoney(t.price),
+        text: t.name + ' — ' + formatMoney(t.price) + ' (còn ' + t.stock + ')',
         callback_data: 't|' + productId + '|' + t.id
       }]);
-      keyboard.push([{ text: '<< Quay lai', callback_data: 'back' }]);
+      keyboard.push([{ text: '« Quay lại', callback_data: 'back' }]);
 
-      await bot.editMessageText(product.name + '\nChon loai:', {
+      await bot.editMessageText('📦 ' + product.name + '\n\nChọn loại bạn muốn mua:', {
         chat_id: chatId,
         message_id: query.message.message_id,
         reply_markup: { inline_keyboard: keyboard }
@@ -123,11 +124,12 @@ bot.on('callback_query', async (query) => {
       return bot.answerCallbackQuery(query.id);
     }
 
+    // Quay lại
     if (dataCb === 'back') {
       const data = await getData();
       const products = data.products.filter(p => p.types && p.types.some(t => t.stock > 0));
-      const keyboard = products.map(p => [{ text: p.name, callback_data: 'p|' + p.id }]);
-      await bot.editMessageText('Chon san pham:', {
+      const keyboard = products.map(p => [{ text: '🛒 ' + p.name, callback_data: 'p|' + p.id }]);
+      await bot.editMessageText('📦 Chọn sản phẩm bạn muốn mua:', {
         chat_id: chatId,
         message_id: query.message.message_id,
         reply_markup: { inline_keyboard: keyboard }
@@ -135,24 +137,25 @@ bot.on('callback_query', async (query) => {
       return bot.answerCallbackQuery(query.id);
     }
 
+    // Chọn loại → tạo đơn + gửi QR
     if (dataCb.startsWith('t|')) {
       const parts = dataCb.split('|');
       const productId = parts[1];
       const typeId = parts[2];
 
-      await bot.answerCallbackQuery(query.id, { text: 'Dang tao don...' });
+      await bot.answerCallbackQuery(query.id, { text: 'Đang tạo đơn...' });
 
       const data = await getData();
       const product = data.products.find(p => p.id === productId);
-      if (!product) return bot.sendMessage(chatId, 'San pham khong ton tai');
+      if (!product) return bot.sendMessage(chatId, 'Sản phẩm không tồn tại');
       const type = (product.types || []).find(t => t.id === typeId);
-      if (!type || type.stock < 1) return bot.sendMessage(chatId, 'Het hang');
+      if (!type || type.stock < 1) return bot.sendMessage(chatId, 'Hết hàng');
 
       const bank = data.config.bank;
       const orderId = makeOrderId();
-      let paymentNote = 'Lay SP ' + product.name + ' + ' + type.name + ' + ' + type.price;
+      let paymentNote = 'Lấy SP ' + product.name + ' + ' + type.name + ' + ' + type.price;
       if (paymentNote.length > 50) {
-        paymentNote = 'Lay SP ' + product.name.slice(0, 12) + ' + ' + type.name.slice(0, 8) + ' + ' + type.price;
+        paymentNote = 'Lấy SP ' + product.name.slice(0, 12) + ' + ' + type.name.slice(0, 8) + ' + ' + type.price;
       }
 
       data.orders.push({
@@ -173,24 +176,25 @@ bot.on('callback_query', async (query) => {
 
       const qrUrl = vietQRUrl(bank, type.price, paymentNote);
       const text =
-        'Don hang ' + orderId + '\n' +
-        'San pham: ' + product.name + '\n' +
-        'Loai: ' + type.name + '\n' +
-        'So tien: ' + formatMoney(type.price) + '\n\n' +
-        'Noi dung CK: ' + paymentNote + '\n\n' +
-        'Quet ma QR de thanh toan.\nSau khi chuyen xong bam nut Da thanh toan.';
+        '🧾 Đơn hàng ' + orderId + '\n\n' +
+        'Sản phẩm: ' + product.name + '\n' +
+        'Loại: ' + type.name + '\n' +
+        'Số tiền: ' + formatMoney(type.price) + '\n\n' +
+        'Nội dung CK: ' + paymentNote + '\n\n' +
+        '📲 Quét mã QR bên dưới để thanh toán.\n' +
+        'Sau khi chuyển xong bấm nút Đã thanh toán.';
 
       try {
         await bot.sendPhoto(chatId, qrUrl, {
           caption: text,
           reply_markup: {
-            inline_keyboard: [[{ text: 'Da thanh toan', callback_data: 'paid|' + orderId }]]
+            inline_keyboard: [[{ text: '✅ Đã thanh toán', callback_data: 'paid|' + orderId }]]
           }
         });
       } catch (e) {
         await bot.sendMessage(chatId, text + '\n\nLink QR:\n' + qrUrl, {
           reply_markup: {
-            inline_keyboard: [[{ text: 'Da thanh toan', callback_data: 'paid|' + orderId }]]
+            inline_keyboard: [[{ text: '✅ Đã thanh toán', callback_data: 'paid|' + orderId }]]
           }
         });
       }
@@ -199,26 +203,32 @@ bot.on('callback_query', async (query) => {
       return;
     }
 
+    // Bấm Đã thanh toán
     if (dataCb.startsWith('paid|')) {
       const orderId = dataCb.slice(5);
       const data = await getData();
       const order = data.orders.find(o => o.id === orderId);
-      if (!order) return bot.answerCallbackQuery(query.id, { text: 'Khong tim thay don' });
-      if (order.userId !== from.id) return bot.answerCallbackQuery(query.id, { text: 'Khong phai don cua ban' });
-      if (order.status !== 'pending') return bot.answerCallbackQuery(query.id, { text: 'Don da xu ly' });
+      if (!order) return bot.answerCallbackQuery(query.id, { text: 'Không tìm thấy đơn' });
+      if (order.userId !== from.id) return bot.answerCallbackQuery(query.id, { text: 'Không phải đơn của bạn' });
+      if (order.status !== 'pending') return bot.answerCallbackQuery(query.id, { text: 'Đơn đã được xử lý' });
 
       order.status = 'waiting_confirm';
       await saveData(data);
-      await bot.answerCallbackQuery(query.id, { text: 'Da gui yeu cau' });
-      await bot.sendMessage(chatId, 'Ban da bao Da thanh toan.\n\nVui long cho it phut, admin se xac nhan don hang va tra key ve cho ban.');
+      await bot.answerCallbackQuery(query.id, { text: 'Đã gửi yêu cầu' });
+      await bot.sendMessage(chatId,
+        '✅ Bạn đã báo Đã thanh toán.\n\n' +
+        '⏳ Vui lòng chờ ít phút, admin sẽ xác nhận đơn hàng và trả key về cho bạn.'
+      );
 
       const adminId = data.config && data.config.adminChatId;
       if (adminId) {
         try {
           await bot.sendMessage(adminId,
-            'Khach bao da thanh toan\nMa: ' + orderId + '\n' +
-            order.productName + ' - ' + order.typeName + '\n' +
-            formatMoney(order.price) + '\nNoi dung: ' + order.paymentNote
+            '🔔 Khách báo đã thanh toán\n' +
+            'Mã: ' + orderId + '\n' +
+            order.productName + ' — ' + order.typeName + '\n' +
+            formatMoney(order.price) + '\n' +
+            'Nội dung: ' + order.paymentNote
           );
         } catch (e) {}
       }
@@ -226,8 +236,8 @@ bot.on('callback_query', async (query) => {
     }
   } catch (err) {
     console.error(err);
-    try { await bot.answerCallbackQuery(query.id, { text: 'Loi: ' + (err.message || '').slice(0, 40) }); } catch (e) {}
-    try { await bot.sendMessage(chatId, 'Loi: ' + (err.message || err)); } catch (e) {}
+    try { await bot.answerCallbackQuery(query.id, { text: 'Lỗi: ' + (err.message || '').slice(0, 40) }); } catch (e) {}
+    try { await bot.sendMessage(chatId, 'Lỗi: ' + (err.message || err)); } catch (e) {}
   }
 });
 
