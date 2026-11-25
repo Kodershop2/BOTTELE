@@ -184,19 +184,42 @@ bot.on('callback_query', async (query) => {
         '📲 Quét mã QR bên dưới để thanh toán.\n' +
         'Sau khi chuyển xong bấm nút Đã thanh toán.';
 
+      // Ưu tiên gửi ảnh QR trực tiếp
+      let sentPhoto = false;
       try {
-        await bot.sendPhoto(chatId, qrUrl, {
-          caption: text,
-          reply_markup: {
-            inline_keyboard: [[{ text: '✅ Đã thanh toán', callback_data: 'paid|' + orderId }]]
-          }
-        });
+        // Tải ảnh QR về rồi gửi buffer (ổn định hơn gửi URL)
+        const imgRes = await fetch(qrUrl);
+        if (imgRes.ok) {
+          const buffer = await imgRes.buffer();
+          await bot.sendPhoto(chatId, buffer, {
+            caption: text,
+            reply_markup: {
+              inline_keyboard: [[{ text: '✅ Đã thanh toán', callback_data: 'paid|' + orderId }]]
+            }
+          });
+          sentPhoto = true;
+        }
       } catch (e) {
-        await bot.sendMessage(chatId, text + '\n\nLink QR:\n' + qrUrl, {
-          reply_markup: {
-            inline_keyboard: [[{ text: '✅ Đã thanh toán', callback_data: 'paid|' + orderId }]]
-          }
-        });
+        console.error('Loi tai/gui anh QR:', e.message);
+      }
+
+      // Nếu gửi ảnh thất bại thì gửi link
+      if (!sentPhoto) {
+        try {
+          await bot.sendPhoto(chatId, qrUrl, {
+            caption: text,
+            reply_markup: {
+              inline_keyboard: [[{ text: '✅ Đã thanh toán', callback_data: 'paid|' + orderId }]]
+            }
+          });
+          sentPhoto = true;
+        } catch (e2) {
+          await bot.sendMessage(chatId, text + '\n\n🔗 Link QR (bấm vào để xem):\n' + qrUrl, {
+            reply_markup: {
+              inline_keyboard: [[{ text: '✅ Đã thanh toán', callback_data: 'paid|' + orderId }]]
+            }
+          });
+        }
       }
 
       try { await bot.deleteMessage(chatId, query.message.message_id); } catch (e) {}
