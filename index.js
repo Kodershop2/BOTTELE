@@ -19,7 +19,7 @@ console.log('Bot started');
 const mainKeyboard = {
   keyboard: [[{ text: '🛒 Mua hàng' }]],
   resize_keyboard: true,
-  persistent: true
+  is_persistent: true
 };
 
 async function getData() {
@@ -96,7 +96,11 @@ async function showShop(chatId) {
     return bot.sendMessage(chatId, 'Hiện chưa có sản phẩm nào.', { reply_markup: mainKeyboard });
   }
   const keyboard = products.map(p => [{ text: '🛒 ' + p.name, callback_data: 'p|' + p.id }]);
+  // Gửi kèm reply keyboard để nút Mua hàng luôn hiện
   await bot.sendMessage(chatId, '📦 Chọn sản phẩm bạn muốn mua:', {
+    reply_markup: mainKeyboard
+  });
+  await bot.sendMessage(chatId, 'Danh sách sản phẩm:', {
     reply_markup: { inline_keyboard: keyboard }
   });
 }
