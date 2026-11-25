@@ -89,6 +89,16 @@ function formatMoney(n) {
   return new Intl.NumberFormat('vi-VN').format(n) + 'đ';
 }
 
+// Gạch ngang chữ (Unicode) — dùng trong nút Telegram
+function strikeText(s) {
+  return String(s).split('').map(function(c) { return c + '̶'; }).join('');
+}
+
+function formatMoneyShort(n) {
+  if (n >= 1000) return new Intl.NumberFormat('vi-VN').format(n / 1000) + 'k';
+  return formatMoney(n);
+}
+
 function makeOrderId() {
   return 'DH' + Date.now().toString().slice(-8);
 }
@@ -208,21 +218,27 @@ bot.on('callback_query', async (query) => {
       const reseller = isReseller(data, from.id);
 
       const keyboard = types.map(t => {
-        let label = t.name + ' — ' + formatMoney(t.price);
+        let label;
         if (reseller && t.resellerPrice > 0) {
-          label = t.name + ' — bán ' + formatMoney(t.price) + ' | mua ' + formatMoney(t.resellerPrice);
+          // Giá gốc gạch ngang + giá RS + số lượng gọn
+          const goc = strikeText(formatMoneyShort(t.price));
+          const rs = formatMoneyShort(t.resellerPrice);
+          label = t.name + ' ' + goc + ' (' + rs + ') x' + t.stock;
+        } else {
+          label = t.name + ' — ' + formatMoneyShort(t.price) + ' (còn ' + t.stock + ')';
         }
-        label += ' (còn ' + t.stock + ')';
+        // Telegram giới hạn ~64 ký tự mỗi nút
+        if (label.length > 60) label = label.slice(0, 57) + '...';
         return [{ text: label, callback_data: 't|' + productId + '|' + t.id }];
       });
       keyboard.push([{ text: '« Quay lại', callback_data: 'back' }]);
 
       let header = '📦 ' + product.name + '\n\n';
       if (reseller) {
-        header += 'Bạn là Reseller — giá mua (reseller) sẽ được áp dụng.\n';
-        header += 'Mỗi dòng: loại (giá bán) (giá mua reseller)\n\n';
+        header += 'Bạn là Reseller.\n';
+        header += 'Hiển thị: Tên  ~~giá gốc~~  (giá RS) xSố lượng\n\n';
       }
-      header += 'Chọn loại bạn muốn mua:';
+      header += 'Chọn loại:';
 
       await bot.editMessageText(header, {
         chat_id: chatId,
