@@ -3,6 +3,8 @@
  */
 const TelegramBot = require('node-telegram-bot-api');
 const fetch = require('node-fetch');
+const fs = require('fs');
+const path = require('path');
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '9174341797:AAFsyiFSXwisG-UFvFmbiP_vHTWURBcLkfI';
 const BIN_ID = process.env.BIN_ID || '6b065e37ffd5d16053dc0c74';
@@ -200,23 +202,22 @@ bot.on('callback_query', async (query) => {
       };
 
       let sentPhoto = false;
+      const tmpFile = path.join('/tmp', 'qr_' + orderId + '.png');
 
-      // Gửi ảnh bằng buffer đúng cách (source + filename)
       try {
         const buffer = await downloadQR(qrUrl);
-        await bot.sendPhoto(chatId, {
-          source: buffer,
-          filename: 'vietqr.png'
-        }, {
+        fs.writeFileSync(tmpFile, buffer);
+        await bot.sendPhoto(chatId, tmpFile, {
           caption: text,
           reply_markup: replyMarkup
         });
         sentPhoto = true;
       } catch (e1) {
-        console.error('Buffer photo fail:', e1.message);
+        console.error('File photo fail:', e1.message);
+      } finally {
+        try { fs.unlinkSync(tmpFile); } catch (e) {}
       }
 
-      // Thử URL nếu buffer fail
       if (!sentPhoto) {
         try {
           await bot.sendPhoto(chatId, qrUrl, {
