@@ -1,10 +1,8 @@
 /**
- * Shop Telegram Bot
+ * Shop Telegram Bot - có Reseller
  */
 const TelegramBot = require('node-telegram-bot-api');
 const fetch = require('node-fetch');
-const fs = require('fs');
-const path = require('path');
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '9174341797:AAFsyiFSXwisG-UFvFmbiP_vHTWURBcLkfI';
 const BIN_ID = process.env.BIN_ID || '6b065e37ffd5d16053dc0c74';
@@ -15,9 +13,9 @@ const API = 'https://api.jsonbin.io/v3/b/' + BIN_ID;
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 console.log('Bot started');
 
-// Nút Mua hàng luôn hiện
+// Bàn phím cố định - 2 nút cùng 1 hàng cho đẹp
 const mainKeyboard = {
-  keyboard: [[{ text: '🛒 Mua hàng' }]],
+  keyboard: [[{ text: '🛒 Mua hàng' }, { text: '🔙 Quay lại' }]],
   resize_keyboard: true,
   is_persistent: true
 };
@@ -33,6 +31,7 @@ async function getData() {
   if (!data.orders) data.orders = [];
   if (!data.config) data.config = {};
   if (!data.users) data.users = [];
+  if (!data.config.resellers) data.config.resellers = [];
   if (!data.config.bank) {
     data.config.bank = {
       bin: '970454',
@@ -56,7 +55,18 @@ async function saveData(data) {
   if (!res.ok) throw new Error('Lưu JSONBin lỗi ' + res.status);
 }
 
-// Lưu user đã tương tác
+function isReseller(data, userId) {
+  const list = (data.config && data.config.resellers) || [];
+  return list.some(r => String(r) === String(userId) || String(r.id) === String(userId));
+}
+
+function getPrice(type, asReseller) {
+  if (asReseller && type.resellerPrice != null && type.resellerPrice > 0) {
+    return type.resellerPrice;
+  }
+  return type.price;
+}
+
 async function trackUser(from) {
   try {
     const data = await getData();
@@ -89,18 +99,22 @@ function vietQRUrl(bank, amount, addInfo) {
   return 'https://img.vietqr.io/image/' + bank.bin + '-' + bank.account + '-compact2.png?amount=' + amount + '&addInfo=' + info + '&accountName=' + accName;
 }
 
-async function showShop(chatId) {
+async function showShop(chatId, userId) {
   const data = await getData();
   const products = data.products.filter(p => p.types && p.types.some(t => t.stock > 0));
+  const reseller = isReseller(data, userId);
+
   if (!products.length) {
     return bot.sendMessage(chatId, 'Hiện chưa có sản phẩm nào.', { reply_markup: mainKeyboard });
   }
-  const keyboard = products.map(p => [{ text: '🛒 ' + p.name, callback_data: 'p|' + p.id }]);
-  // Gửi kèm reply keyboard để nút Mua hàng luôn hiện
-  await bot.sendMessage(chatId, '📦 Chọn sản phẩm bạn muốn mua:', {
+
+  // Giữ bàn phím cố định phía trên
+  await bot.sendMessage(chatId, reseller ? '📦 Danh sách sản phẩm (bạn là Reseller):' : '📦 Chọn sản phẩm bạn muốn mua:', {
     reply_markup: mainKeyboard
   });
-  await bot.sendMessage(chatId, 'Danh sách sản phẩm:', {
+
+  const keyboard = products.map(p => [{ text: '🛒 ' + p.name, callback_data: 'p|' + p.id }]);
+  await bot.sendMessage(chatId, 'Chọn sản phẩm:', {
     reply_markup: { inline_keyboard: keyboard }
   });
 }
@@ -109,31 +123,54 @@ async function showShop(chatId) {
 bot.onText(/\/start/, async (msg) => {
   await trackUser(msg.from);
   await bot.sendMessage(msg.chat.id,
-    'Chào bạn! 👋\n\nBấm nút **Mua hàng** bên dưới hoặc gửi /shop để xem sản phẩm.',
-    { parse_mode: 'Markdown', reply_markup: mainKeyboard }
+    'Chào bạn! 👋\n\nBấm nút bên dưới hoặc gửi lệnh:\n• 🛒 Mua hàng / /shop — xem sản phẩm\n• /id — xem ID tài khoản của bạn',
+    { reply_markup: mainKeyboard }
   );
+});
+
+// /id
+bot.onText(/\/id/, async (msg) => {
+  await trackUser(msg.from);
+  const data = await getData();
+  const reseller = isReseller(data, msg.from.id);
+  let text = '🆔 ID tài khoản của bạn: `' + msg.from.id + '`\n';
+  if (msg.from.username) text += 'Username: @' + msg.from.username + '\n';
+  text += 'Vai trò: ' + (reseller ? 'Reseller' : 'Khách thường');
+  await bot.sendMessage(msg.chat.id, text, { parse_mode: 'Markdown', reply_markup: mainKeyboard });
 });
 
 // /shop
 bot.onText(/\/shop/, async (msg) => {
   await trackUser(msg.from);
   try {
-    await showShop(msg.chat.id);
+    await showShop(msg.chat.id, msg.from.id);
   } catch (e) {
     bot.sendMessage(msg.chat.id, 'Lỗi: ' + e.message, { reply_markup: mainKeyboard });
   }
 });
 
-// Nút "Mua hàng"
+// Nút bàn phím
 bot.on('message', async (msg) => {
   if (!msg.text) return;
-  if (msg.text === '🛒 Mua hàng' || msg.text === 'Mua hàng') {
+  const t = msg.text.trim();
+  if (t.startsWith('/')) return;
+
+  if (t === '🛒 Mua hàng' || t === 'Mua hàng') {
     await trackUser(msg.from);
     try {
-      await showShop(msg.chat.id);
+      await showShop(msg.chat.id, msg.from.id);
     } catch (e) {
       bot.sendMessage(msg.chat.id, 'Lỗi: ' + e.message, { reply_markup: mainKeyboard });
     }
+    return;
+  }
+
+  if (t === '🔙 Quay lại' || t === 'Quay lại') {
+    await bot.sendMessage(msg.chat.id,
+      'Bạn đang ở menu chính.\nBấm 🛒 Mua hàng hoặc gửi /shop để xem sản phẩm.',
+      { reply_markup: mainKeyboard }
+    );
+    return;
   }
 });
 
@@ -168,13 +205,26 @@ bot.on('callback_query', async (query) => {
       const types = (product.types || []).filter(t => t.stock > 0);
       if (!types.length) return bot.answerCallbackQuery(query.id, { text: 'Hết hàng' });
 
-      const keyboard = types.map(t => [{
-        text: t.name + ' — ' + formatMoney(t.price) + ' (còn ' + t.stock + ')',
-        callback_data: 't|' + productId + '|' + t.id
-      }]);
+      const reseller = isReseller(data, from.id);
+
+      const keyboard = types.map(t => {
+        let label = t.name + ' — ' + formatMoney(t.price);
+        if (reseller && t.resellerPrice > 0) {
+          label = t.name + ' — bán ' + formatMoney(t.price) + ' | mua ' + formatMoney(t.resellerPrice);
+        }
+        label += ' (còn ' + t.stock + ')';
+        return [{ text: label, callback_data: 't|' + productId + '|' + t.id }];
+      });
       keyboard.push([{ text: '« Quay lại', callback_data: 'back' }]);
 
-      await bot.editMessageText('📦 ' + product.name + '\n\nChọn loại bạn muốn mua:', {
+      let header = '📦 ' + product.name + '\n\n';
+      if (reseller) {
+        header += 'Bạn là Reseller — giá mua (reseller) sẽ được áp dụng.\n';
+        header += 'Mỗi dòng: loại (giá bán) (giá mua reseller)\n\n';
+      }
+      header += 'Chọn loại bạn muốn mua:';
+
+      await bot.editMessageText(header, {
         chat_id: chatId,
         message_id: query.message.message_id,
         reply_markup: { inline_keyboard: keyboard }
@@ -203,15 +253,17 @@ bot.on('callback_query', async (query) => {
 
       const data = await getData();
       const product = data.products.find(p => p.id === productId);
-      if (!product) return bot.sendMessage(chatId, 'Sản phẩm không tồn tại');
+      if (!product) return bot.sendMessage(chatId, 'Sản phẩm không tồn tại', { reply_markup: mainKeyboard });
       const type = (product.types || []).find(t => t.id === typeId);
-      if (!type || type.stock < 1) return bot.sendMessage(chatId, 'Hết hàng');
+      if (!type || type.stock < 1) return bot.sendMessage(chatId, 'Hết hàng', { reply_markup: mainKeyboard });
 
+      const reseller = isReseller(data, from.id);
+      const price = getPrice(type, reseller);
       const bank = data.config.bank;
       const orderId = makeOrderId();
-      let paymentNote = 'Lấy SP ' + product.name + ' + ' + type.name + ' + ' + type.price;
+      let paymentNote = 'Lấy SP ' + product.name + ' + ' + type.name + ' + ' + price;
       if (paymentNote.length > 50) {
-        paymentNote = 'Lấy SP ' + product.name.slice(0, 12) + ' + ' + type.name.slice(0, 8) + ' + ' + type.price;
+        paymentNote = 'Lấy SP ' + product.name.slice(0, 12) + ' + ' + type.name.slice(0, 8) + ' + ' + price;
       }
 
       data.orders.push({
@@ -223,19 +275,20 @@ bot.on('callback_query', async (query) => {
         productName: product.name,
         typeId,
         typeName: type.name,
-        price: type.price,
+        price: price,
+        isReseller: reseller,
         status: 'pending',
         paymentNote,
         createdAt: new Date().toISOString()
       });
       await saveData(data);
 
-      const qrUrl = vietQRUrl(bank, type.price, paymentNote);
-      const text =
+      const qrUrl = vietQRUrl(bank, price, paymentNote);
+      let text =
         '🧾 Đơn hàng ' + orderId + '\n\n' +
         'Sản phẩm: ' + product.name + '\n' +
         'Loại: ' + type.name + '\n' +
-        'Số tiền: ' + formatMoney(type.price) + '\n\n' +
+        'Số tiền: ' + formatMoney(price) + (reseller ? ' (giá Reseller)' : '') + '\n\n' +
         'Nội dung CK: ' + paymentNote + '\n\n' +
         '📲 Bấm vào link bên dưới để xem mã QR thanh toán:\n' +
         qrUrl + '\n\n' +
@@ -264,7 +317,8 @@ bot.on('callback_query', async (query) => {
       await bot.answerCallbackQuery(query.id, { text: 'Đã gửi yêu cầu' });
       await bot.sendMessage(chatId,
         '✅ Bạn đã báo Đã thanh toán.\n\n' +
-        '⏳ Vui lòng chờ ít phút, admin sẽ xác nhận đơn hàng và trả key về cho bạn.'
+        '⏳ Vui lòng chờ ít phút, admin sẽ xác nhận đơn hàng và trả key về cho bạn.',
+        { reply_markup: mainKeyboard }
       );
 
       const adminId = data.config && data.config.adminChatId;
@@ -274,7 +328,7 @@ bot.on('callback_query', async (query) => {
             '🔔 Khách báo đã thanh toán\n' +
             'Mã: ' + orderId + '\n' +
             order.productName + ' — ' + order.typeName + '\n' +
-            formatMoney(order.price) + '\n' +
+            formatMoney(order.price) + (order.isReseller ? ' (Reseller)' : '') + '\n' +
             'Nội dung: ' + order.paymentNote
           );
         } catch (e) {}
