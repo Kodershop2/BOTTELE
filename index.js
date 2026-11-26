@@ -131,14 +131,9 @@ async function showShop(chatId, userId) {
 
   const keyboard = products.map(p => {
     const stock = (p.types || []).reduce((s, t) => s + (t.stock || 0), 0);
-    return [{ text: '🎯 ' + p.name + '  •  📦' + stock, callback_data: 'p|' + p.id }];
+    return [{ text: '🛒 ' + p.name, callback_data: 'p|' + p.id }];
   });
-
-  // Thêm hàng nút menu trên cùng danh sách
-  keyboard.push([
-    { text: '🛍️ Mua hàng', callback_data: 'menu_shop' },
-    { text: '🪪 ID của tôi', callback_data: 'menu_id' }
-  ]);
+  keyboard.push([{ text: '🛍️ Mua hàng', callback_data: 'menu_shop' }]);
 
   await bot.sendMessage(chatId, text, {
     parse_mode: 'HTML',
@@ -297,13 +292,9 @@ bot.on('callback_query', async (query) => {
 
       const keyboard = products.map(p => {
         const stock = (p.types || []).reduce((s, t) => s + (t.stock || 0), 0);
-        return [{ text: '🎯 ' + p.name + '  •  📦' + stock, callback_data: 'p|' + p.id }];
+        return [{ text: '🛒 ' + p.name, callback_data: 'p|' + p.id }];
       });
-      keyboard.push([
-        { text: '🛍️ Mua hàng', callback_data: 'menu_shop' },
-        { text: '🪪 ID của tôi', callback_data: 'menu_id' }
-      ]);
-
+      keyboard.push([{ text: '🛍️ Mua hàng', callback_data: 'menu_shop' }]);
       await bot.editMessageText(text, {
         chat_id: chatId,
         message_id: query.message.message_id,
